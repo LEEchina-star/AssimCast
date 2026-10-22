@@ -1,0 +1,34 @@
+# data, weights, results and caches are intentionally NOT shipped
+data/
+runs/
+results/
+*.pt
+*.ckpt
+*.pth
+*.npz
+*.npy
+*.nc
+*.grib
+*.grb
+*.grib2
+*.pkl
+*.csv
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.zip
+*.tar.gz
+*.tgz
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.DS_Store
+*.bak
+*.bak_*
+*.log

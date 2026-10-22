@@ -1,0 +1,109 @@
+# ============================================================================
+# AssimCast configuration (final coarse-to-fine model, 336 x 336 at 0.06 deg)
+#
+# Stage A (motion): CenterHead predicts the f000->f006 vortex displacement;
+#     a continuous tanh whole-state displacement backward-warps the coarse
+#     ERA5 analysis (vortex follows the TC, outer field blends to the
+#     environmental flow).
+# Stage B (super-resolution): a conditional pixel-space diffusion learns the
+#     motion-compensated coarse->fine increment x0 = HAFS_f006 - era_adv,
+#     i.e. the eyewall, RMW, high-wind tail and asymmetry that ERA5 smooths.
+# Stage C (training-free assimilation): the frozen Stage-B model is steered at
+#     inference by real SAR / SMAP / AMSR2 surface winds through the
+#     observation operator in model/da_v6_footprint.py. No retraining.
+#
+# Paths are resolved relative to the package root (env ASSIMCAST_ROOT).
+# ============================================================================
+
+domain:
+  resolution: 0.06
+  grid_size: 336
+  window_deg: 20.1        # 336 * 0.06
+  env_window_deg: 32.0    # native-resolution coarse environment channels
+
+data:
+  train_dir: "data/hafs_parent_v6"
+  centers_csv: "data/hafs_parent_v4/centers_trak_v5.csv"
+  normalizer_path: "data/processed/normalizer.json"
+  # ten conditioning channels:
+  #   fine history  tau-18,-12,-6           : 6 (ERA5 upsampled to 0.06)
+  #   advected tau (Stage A whole-field warp): 2
+  #   native coarse 32-deg environment       : 2
+  cond_channels: 10
+  # Stage A motion pretraining (three decades of ERA5) and Stage B fine-tuning
+  # use the HAFS 2023 season only; 2024 and 2025/2026 are held out.
+  stage_a_years: [1993, 2018]
+  stage_b_finetune_season: 2023
+  heldout_years: [2024, 2025, 2026]
+
+model:
+  type: "conditional_unet"
+  in_channels: 2
+  out_channels: 2
+  model_channels: 64
+  channel_mult: [1, 2, 4, 8]
+  num_res_blocks: 2
+  attention_resolutions: [16, 8]
+  dropout: 0.1
+  use_cond: true
+  cond_channels: 10
+  timestep_embed_dim: 256
+
+center_head:
+  enabled: true
+  seq_len: 4
+  hidden: 64
+  use_motion: true
+
+# Stage B physical / anti-peak-shaving losses (final values; see train.py)
+loss:
+  w_track: 20.0
+  w_grad: 0.10
+  w_spec: 0.05
+  w_hi: 0.80
+  w_peak: 1.00
+  under_pen: 2.0
+  resid_clip: 8.0
+  focus_R_deg: 3.5
+  focus_s_deg: 1.0
+  core_r_deg: 1.5
+  warp_R_deg: 3.0
+  warp_s_deg: 1.5
+
+diffusion:
+  timesteps: 1000
+  beta_schedule: "cosine"
+  beta_start: 0.0001
+  beta_end: 0.02
+  loss_type: "mse"
+  model_mean_type: "epsilon"
+
+training:
+  batch_size: 1
+  epochs: 40
+  learning_rate: 2.0e-5
+  center_learning_rate: 1.0e-4
+  weight_decay: 0.0
+  ema_decay: 0.998
+  grad_clip: 1.0
+  mixed_precision: "bf16"
+  strong_oversample: 2.0   # cat3+ (>=96 kt) sampling weight
+  shift_deg: 2.0
+  seed: 0
+  device: "auto"          # cuda | mps | cpu | auto
+
+# Stage C training-free multi-satellite assimilation. Only these three real
+# sources are used; no GNSS-R or simulated microwave winds are ingested.
+assimilation:
+  sources: ["sar", "smap", "amsr2"]
+  steps: 50
+  r_assim_deg: 4.0
+  gate_vmax_kt: 25.0
+  max_obs_per_sample: 600
+  observation_time_window_min: 30
+  observation_space_window_deg: 0.25
+
+evaluation:
+  metrics: ["rmse", "mae", "bias", "correlation"]
+  wind_bins_ms: [0, 17, 25, 33, 50]
+  output_dir: "results"
